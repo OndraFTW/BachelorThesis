@@ -1,0 +1,520 @@
+
+\lstdefinelanguage{rust}{
+    morekeywords={as,break,do,else,enum,extern,false,fn,for,if,impl,in,let,loop,match,mod,mut,priv,pub,ref,return,self,static,struct,super,true,trait,type,unsafe,use,while},
+    morecomment=[l]{//},
+    morecomment=[s]{/*}{*/},
+    sensitive=true
+}
+
+\renewcommand{\lstlistingname}{Ukázka kódu}
+\lstset{
+    basicstyle=\footnotesize\ttfamily,
+    commentstyle=\color{gray},
+    keywordstyle=\bf,
+    captionpos=b
+}
+
+\chapter{Úvod}
+
+Bìhem posledních 60 let se pomìr mezi cenou výkonem procesorù zlep¹il pøibli¾nì 100 miliardakrát. Vìt¹inu pøedchozích dvou desetiletí vyu¾ili hardwarový architekti tento pokrok ke zvy¹ování rychlosti tranzistorù. Nevýhodou tohoto pøístupu je zvy¹ování spotøeby energie a teploty. Trendem posledních let je tvorba procesorù obsahujících nìkolik jader, kde rùzné jádra provádìjí souèasnì rùzné výpoèty. Vícejádrové procesory sice vyøe¹ily problémy s~výkonem, ale pøiná¹ejí také komplikace. Tou hlavní je bezpeèná paralelizace programù.
+
+Cílem této práce je porovnámí paralelizace v~jazyce Rust a API OpenMP. Pro srovnání jsou pou¾ity algoritmy pro výpoèet n-rozmìrné konvoluce. Oba zpùsoby paralelizace budou porovnány podle výkonu a podle programátorské pøívìtivosti.
+
+Druhá kapitola této práce se zabývá popisem technologií pro tvorbu paraleních programù: jazykem Rust a API OpenMP. Tøetí kapitola definuje matematickou operaci konvoluce a zpùsoby jejího výpoètu. Ètvrtá kapitola se vìnuje implementacím metod ze tøetí kapitoly pomocí technologií popsaných v~druhé kapitole. Pátá kapitola popisuje, jakým zpùsobem byly zmìøeny výsledky pou¾ívané v~následující kapitole. ©está kapitola porovnává implementace podle nìkolika kritérií. V~závìru se nachází zhodnocení výsledkù a návrhy pro jejich dal¹í vyu¾ití.
+
+\chapter{Pøístupy k~paralelizaci}
+\label{chap:paralelization}
+
+Tato kapitola je vìnována popisu technologií, pou¾itých v~této práci. V~první podkapitole je popsána historie a vlastnosti programovacího jazyka Rust. Dùraz je kladen hlavnì na výhody, které tyto vlastnosti pøiná¹ejí, oproti jazyku C a zpùsoby meziprocesorové komunikace které Rust podporuje. Následující podkapitola se vìnuje historii a pou¾ití API OpenMP pøi paralelním programování v~jazyce C.
+
+\section{Jazyk Rust}
+\label{sec:rust}
+
+Rust je staticky typovaný programovací jazyk se zamìøením na bezpeènost práce s~pamìtí, paralelní programování a výkon. Podporuje èistì funkcionální, procedurální i objektovì orientovaný styl programování. Syntaxe a sémantika Rustu je inspirována syntaxí a sémantikou jazyka C++.\cite{rust:site} Autorem jazyka je Graydon Hoare, který zaèal na Rustu pracovat v~roce 2006. O~tøi roky pozdìji se k~vývoji pøidal jeho zamìstnavatel --- Mozilla a v~roce 2012 byla vydána první verze pøekladaèe.\cite{rust:lambda}
+
+\subsection{Základní konstrukce jazyka Rust}
+\label{sub:rust_basics}
+Jazyk Rust obsahuje nìkolik typù promìnných, které je mo¾né rozdìlit do tøí skupin~na primitivní, textové a slo¾ené datové typy. Promìnné jsou definovány pomocí klíèového slova {\tt let} a jsou implicitnì nemìnitelné. Mìnitelné promìnné jsou definovány pomocí dvojice klíèových slov {\tt let mut}. Explicitní urèení datového typu je volitelné, pokud není uveden, tak je odvozen z~hodnoty, která je promìnné pøiøazena.
+
+Rust obsahuje deset primitivních datových typù, pìt znaménkových a pìt bezznaménkových, které pøedstavují celá èísla: {\tt int}, {\tt i8}, {\tt i16}, {\tt i32}, {\tt i64}, {\tt uint}, {\tt u8}, {\tt u16}, {\tt u32}, {\tt u64}. Èísla s~desetinou èárkou pøedstavují datové typy {\tt f32} a {\tt f64}. Zbývající primitivní datové typy jsou {\tt bool} a {\tt ()}, který nabývá pouze hodnoty {\tt ()} a pou¾ívá se jako implicitní typ návratové hodnoty funkcí.
+
+Textové datové typy jsou dva a to {\tt char}, pøedstavující jeden znak textu, a {\tt str}, øetìzec znakù. Typ {\tt char} je zapisován pomocí jednoduchých uvozovek a {\tt str} pomocí slo¾ených uvozovek. 
+
+Slo¾ené datové typy jazyka Rust jsou struktura, vektor a entice. Pro nemìnitelné slo¾ené datové typy platí, ¾e v¹echny jejich èásti jsou také nemìnitelné, a pro mìnitelné slo¾ené datové typy platí, ¾e v¹echny jejich èásti jsou také mìnitelné. Není tak mo¾né vytvoøit strukturu, která by byla èásteèné mìnitelná a èásteènì nemìnitelná. Struktury Rustu jsou velmi podobné strukturám jazyka C. Struktury jsou definovány pomocí klíèového slova {\tt struct} následovaného jménem struktury a seznamem prvkù struktury. Seznam prvkù struktury se zapisuje do slo¾ených závorek a je tvoøen definicí prvkù oddìlených èárkou. Ka¾dý prvek struktury je definován pomocí svého jména a datového typu a ty jsou oddìleny dvouteèkou. Definice struktury je zobrazena v~ukázce kódu \ref{code:rust_struct}. Typ vektor je podobný typu pole z~jazyka C, narozdíl od nìj ale obsahuje kontrolu indexù. Pøi pokusu o~pøístup mimo vektor je vyvolána chyba programu a nedojde tak k~poru¹ení pamìti\footnote{Segmentation fault}. Entice jsou bezejmené struktury slo¾ené z~bezejmených prvkù a jsou znaèeny pomocí závorek.\cite{rust:tutorial} Ukázka kódu \ref{code:rust_vars} zobrazuje definice promìnných rùzných datových typù.
+
+\begin{lstlisting}[float,language=rust,caption=Definice promìnných,label=code:rust_vars]
+fn main(){
+    let a=10i;                 //datový typ int
+    let b:int=10;              //datový typ int
+    let c="Já jsem øetìzec.";  //datový typ str
+    let mut d=1.4;             //datový typ f32
+    let vector=[1,2,3];        //vektor obsahující èísla typu int
+    let tuple=(4, 5.3);        //entice
+}
+\end{lstlisting}
+
+\begin{lstlisting}[float,language=rust,caption={Definice struktury {\tt MyStruct}},label=code:rust_struct]
+    struct MyStruct{
+        value:int,
+        string:~str,
+        real:f64
+    }
+\end{lstlisting}
+
+Definice funkcí zaèínají klíèovým slovem {\tt fn}, obsahují vstupní promìnné a jejich typy oddìlené dvouteèkou. Pokud funkce vrací hodnotu je její datový typ uveden v~hlavièce funkce za operátorem {\tt ->}. Funkce v~ukázce kódu \ref{code:rust_fn} provede souèet dvou celých èísel a vrátí výsledek. Podobnì jako v~jazyce C vstupním bodem programu je funkce {\tt main}.\cite{rust:tutorial}
+
+\begin{lstlisting}[float,language=rust,caption=Definice funkce,label=code:rust_fn]
+fn sum(a:int, b:int)->int{
+    let c=a+b;
+    return c;
+}
+\end{lstlisting}
+
+Rust, stejnì jako jazyk C, obsahuje vìtvení {\tt if} a cyklus {\tt while}. Druhým cyklem je nekoneèný cyklus {\tt loop}. Funkci konstrukce {\tt switch} z~jazyka C plní v~Rustu {\tt match}. Novou konstrukcí je {\tt spawn}, který slou¾í k~tvorbì nových vláken. Pøi vytvoøení nového vlákna je vlastnictví pamì»i (viz. \ref{subsub:smart_pointers}) vyu¾ívané v~tomto vláknì pøesunuto do tohoto vlákna. Kdy¾ vlákno dojde na konec konstrukce {\tt spawn} je ukonèeno a odstranìno z~pamìti.\cite{rust:tutorial}
+
+\begin{lstlisting}[float,language=rust,caption=Tvorba vláken,label=code:rust_spawn]
+    fn main(){
+        spawn(proc(){
+            println("Vedlej¹í vlákno.");
+        })
+        println("Hlavní vlákno.");
+    }
+\end{lstlisting}
+
+\subsection{Správa pamìti}
+\label{sub:memory_management}
+
+Rust nabýzí nìkolik zpùsobù zprávy pamìti: poèítání referencí, garbage collector a chytré ukazatele, které jsou souèástí syntaxe jazyka a jsou doporuèeným zpùsobem správy pamìti.\cite{rust:gc}
+
+\subsubsection{Chytré ukazatele}
+\label{subsub:smart_pointers}
+Jazyk Rust neumo¾òuje vytvoøit ukazatel, který nikam neukazuje, tzv. null poiter, z~toho plyne, ¾e ka¾dý ukazatel musí ukazovat na platný úsek pamìti nebo být oznaèen jako ukazatel s~pøesunutým vlastnictvím\footnote{ownership}.
+
+Vlastnící ukazatel\footnote{owned pointer}, dále jen ukazatel, je ukazatel, který "vlastní" danou pamì». To znamená, ¾e na tuto pamì» ukazuje právì jeden ukazatel a kdy¾ pozbude platnosti, tak je tato pamì» uvolnìna. Tento ukazatel mù¾e pøedat vlastnìní pamìti jinému ukazatelu, pokud to udìlá, je oznaèen, ¾e jeho hodnota byla pøesunuta\footnote{moved}. Problémy, které jsou zpùsobeny pøesouvání vlastnìní pamìti, je mo¾né odhalit za pøekladu. Ve zdrojovém kódu je znaèen tyldou pøed hodnotou nebo datovým typem. 
+
+Reference je ukazatel, který ukazuje na pamì» vlastnìnou jiným ukazatelem a který se nestará o~její uvolnìní. Pou¾ívá se hlavnì pøi volání funkcí, kdy se ve volající funkci pøedává vlastnící ukazatel, ale ve volané funkci se pøijímá reference. Díky tomuto pøetypování je mo¾né se vyhnout pøedání vlastnìní pøi volání funkcí. Toto demonstruje ukázka kódu \ref{code:rust_pointers}.\cite{rust:tutorial}
+
+\begin{lstlisting}[float,language=rust,caption=Pøetypování ukazatelù,label=code:rust_pointers]
+    fn is_empty(list:&[int])->bool{
+        return list.len()==0;
+    }
+    fn main(){
+        let list=~[1,2,3];
+        if is_empty(list){
+            println("Seznam je prázdný.");
+        }
+    }
+\end{lstlisting}
+
+
+\subsection{Zasílání zpráv}
+\label{sub:message_passing}
+
+Je nejèastìji pou¾ívaný zpùsob synchronizace nìkolika procesù. Je zalo¾ený na tom, ¾e procesy si mezi sebou posílají zprávy. Výhodou zasílání zpráv je to, ¾e programátor nepracuje pøímo se sdílenou pamìtí a díky tomu se pøedchází problémùm, které pøi této práci vznikají. Nevýhodou jsou vy¹¹í èasové a pamì»ové nároky pøi posílání vìt¹ích zpráv a nadbyteèné kopírování dat v~rámci jednoho programu, proto¾e ka¾dý proces má své vlastní kopie promìnných.
+
+Pro zasílání zpráv se v~Rustu pou¾ívají kanály. Ka¾dý kanál se skládá ze struktury {\tt Sender}, která slou¾í k~odesílání zpráv, a {\tt Receiver}, která pøijímá zprávy. {\tt Sender} mù¾e být nakopírován a pou¾íván v~nìkolika rùzných procesech. Kanál má urèený datový typ a mù¾e pøená¹et pouze data tohoto typu. Nový kanál je vytvoøen pomocí funkce {\tt channel} v~modulu {\tt std::comm}. Ukázka kódu \ref{code:rust_channel} demonstruje pou¾ití kanálu v~programu, kde jedno vlákno po¹le èíslo druhému vláknu.\cite{rust:tutorial}
+
+\begin{lstlisting}[float,language=rust,caption=Kanál,label=code:rust_channel]
+    fn main(){
+        let (sender, receiver):(Sender<int>, Receiver<int>)=std::comm::channel();
+        spawn(proc(){
+            sender.send(12);
+        })
+        println!("Obdr¾el jsem {}.", receiver.recv());
+    }
+\end{lstlisting}
+
+\subsection{Sdílená pamì»}
+\label{sub:shared_memory}
+
+Rust podporuje i synchronizaci procesù na základì sdílené pamìti. Pro sdílení dat se pou¾ívá struktura {\tt Arc} (Atomically Reference Counted wrapper), která je jen referencí na sdílená data. Pøi vytváøení procesù se tak kopírují jen reference na sdílená data a sdílená data jsou tak v~systému jen jednou. Tímto zpùsobem je mo¾né sdílet jen nemìnitelná data. \cite{rust:tutorial}
+
+\begin{lstlisting}[float,language=rust,caption=Sdílená pamì»,label=code:rust_arc]
+    fn main(){
+        let shared="Sdílený øetìzec";
+        let arc=Arc::new(shared);
+        spawn(proc(){
+            println!("{}", arc.get());
+        })
+    }
+\end{lstlisting}
+
+\section{OpenMP}
+\label{sec:openmp}
+
+OpenMP je API pro tvorbu paralelních programù v~jazycích C, C++ a Fortran zalo¾ených na sdílení pamìti. Skládá se z~direktiv pro pøekladaè, knihovny funkcí a promìnných prostøedí.\cite{openmp:specification}
+Poèátky OpenMP sahají do 80. let 20. století ke standardu ANSI X3H5. Technické limitace a vzrùst popularity programovacích modelù zalo¾ených na oddìlené pamìti zpùsonili ukonèení dal¹ího vývoje. Vznik OpenMP byl motivován snahou vývojáøù o~vytvoøení standardu pro tvorbu paralelních programù, který by zaji¹»oval pøenositelnost kódu mezi podporovatelnými platformami. Standard ANSI X3H5 byl pou¾it jako základ, na kterém byla vytvoøena první specifikace API - OpenMP 1.0. Verze pro Fortran vy¹la v~øíjnu 1997 a verze pro C/C++ o~rok pozdìji. Nejnovìj¹í verze (v~dobì psaní této práce) je OpenMP 4.0, která vy¹la v~èervenci 2013.\cite{openmp:book}
+
+\subsection{Programovací model}
+\label{sub:programming_model}
+
+OpenMP podporuje programování na principu fork-join. Program zaèíná jako jedno hlavní vlákno. Na zaèátku paralelní èásti programu vytvoøí hlavní vlákno dodateèná vlákna pomocí rozdvojení\footnote{fork}. V¹echna vlákna tvoøí tým vláken, které budou vykonávat paralelní èást programu. Na konci paralelní èásti programu vlákna èekají na ostatní vlákna. Kdy¾ v¹echna vlákna dojdou na konec paralelní èásti programu, slouèí\footnote{join} se do jednoho hlavního vlákna. Toto mù¾e být provedeno nìkolikrát bìhem programu. Poèet dodateèných vláken mù¾e být urèen OpenMP nebo zadán programátorem.\cite{openmp:arc}
+
+\begin{figure}
+  \centering
+  \includegraphics[keepaspectratio=true,scale=0.3]{fig/openmp.png}
+  \caption{Paralelní èást programu v~OpenMP.}
+  \label{fig:sequence_openmp}
+\end{figure}
+
+\subsection{Základní konstrukce}
+\label{sub:openmp_basics}
+
+V~jazyce C se konstrukce OpenMP zapisují pomocí implementaèních direktiv, které se znaèí pomocí {\tt \#pragma omp} a pøíslu¹ných klauzulí. Výhodou tohoto pøístupu je to, ¾e pokud pøekladaè direktivám nerozumí, tak je ignoruje. Díky tomu je mo¾né pøelo¾it programy vyu¾ívající OpenMP i na pøekladaèích, které OpenMP nepodporují. Paralelní èást programu se znaèí direktivou {\tt \#pragma omp parallel} a je tvoøena následujícím pøíkazem nebo sekvencí pøíkazù. Pro promìnné platí, ¾e promnìnné definované mimo paralelní èást programu jsou sdílené v¹emi vlákny a promìnné definované v~ní jsou soukromé pro ka¾dé vlákno.
+
+Jednou ze základních konstrukcí OpenMP je paralelizace cyklu {\tt for} pomocí direktivy {\tt \#pragma omp parallel for}. Díky této konstrukci mù¾e být provádìno nìkolik smyèek cyklu zároveò. Iteraèní promìnná je soukromá pro ka¾dé vlákno. Pokud má nìkolik vláken pøistupovat k~jedné sdílené promìnné, mìli by být tyto pøístupy umístìny v~kritické sekci. Ta se definuje direktivou {\tt \#pragma omp critical(name)}, kde {\tt name} je jméno této sekce. OpenMP zaji¹»uje, ¾e v~danný okam¾ik nemù¾ou být vykonávány dvì kritické sekce se stejným jménem. Poèet vláken pou¾ívaných v~paralelní sekci programu je mo¾né nastavit pomocí direktivy {\tt num\_threads(number\_of\_threads)}, kde {\tt number\_of\_threads} je po¾adovaný poèet vláken.\cite{openmp:book} Ukázka tìchto direktiv je v~ukázce kódu \ref{code:openmp_for_critical}.
+
+\begin{lstlisting}[float,language=c,caption=Direktivy {\tt for} a {\tt critical},label=code:openmp_for_critical]
+    int* array=malloc(10*sizeof(10));
+    #pragma omp parallel for num_threads(4)
+    for(int i=0; i<10; i++){
+        #pragma omp critical(array_update)
+        array[i]=i;
+    }
+\end{lstlisting}
+
+Dal¹í kontrukcí OpenMP je paralelizace sekcí programu pomocí direktiv {\tt \#pragma omp parallel sections} a {\tt \#pragma omp section}. Tyto direktivy rozdìlují sekvenci pøíkazù na sekce, které je mo¾né provádìt oddìlenì v~rùzných vláknech a v~rùzném poøadí. Klauzuje {\tt if(podminka)} pøidaná k~direktivì obsahující {\tt parallel} zpùsobí, ¾e paralelizace bude provedena pouze pokud platí podmínka.\cite{openmp:book} Tyto direktivy jsou demonstrovány v~ukázce kódu \ref{code:openmp_sections_if}.
+
+\begin{lstlisting}[float,language=c,caption={Direktivy {\tt sections}, {\tt section} a {\tt if}},label=code:openmp_sections_if]
+    #pragma omp parallel sections if(use_threads)
+    {
+        printf("První sekce");
+        #pragma omp section
+        printf("Druhá sekce");
+    }
+\end{lstlisting}
+
+\chapter{Diskrétní konvoluce}
+\label{chap:convolution}
+
+Tato kapitola je vìnována teoretickým základùm, které jsou nutné pro porozumìní této práce. V~první podkapitole definuji pojem diskrétní konvoluce, následují dvì podkapitoly se vìnují zpùsobùm výpoètu konvoluce a poslední podkapitola popisuje jak pøevést konvoluci n-rozmìrných signálù na konvoluci jedrozmìrných signálù.
+
+\section{Definice}
+\label{sec:conv_definition}
+
+Diskrétní konvoluce je matematická operace nad dvìma diskrétními signály $x$ a $h$ definovaná vzorcem \ref{eq:discrete_convolution}. Jejím výsledkem je diskrétní signál $y$.
+
+\begin{equation}
+y[n]=(x*h)[n]=\sum_{i=-\infty}^{\infty}{x[n-i]h[i]}
+\label{eq:discrete_convolution}
+\end{equation}
+
+Problémem pøedchozí definice je to, ¾e pracuje nad signály nekoneèné délky. Vzorec \ref{eq:finite_discrete_convolution}, kde $m$ je délka signálu $h$, vznikl upravením vzorce \ref{eq:discrete_convolution} pro signály o~koneèné délce. \cite{conv:recipes}
+
+\begin{equation}
+y[n]=(x*h)[n]=\sum_{i=0}^{m-1}{x[n-i]h[i]}
+\label{eq:finite_discrete_convolution}
+\end{equation}
+
+\section{Metoda overlap-save}
+\label{sec:overlap_save}
+
+Metoda overlap-save je zpùsob výpoètu konvoluce signálu $x$ a jádra $h$ o~délce $m$. Výsledný signál $y$ je rozdìlen na segmenty o~délce $l$, které jsou vypoèteny samostatnì a následnì konkatenovány. Ka¾dý segment zaèíná na $kl+m-1$ prvku výstupního signálu, kde $k$ je index segmentu. Ve vzorci \ref{eq:signal_segments1} definuji signál $x_{k}$, který je ktý segment vstupního signálu $x$. Vzorec \ref{eq:signal_segments2} je definicí signálu $y_{k}$, který je ktý segment výstupního signálu $y$.
+
+\begin{equation}
+x_{k}[n]=\begin{cases}
+x[kl+n] & 0 \le n < l+m-1
+\\
+0 & \mbox{ostatní}
+\end{cases}
+\label{eq:signal_segments1}
+\end{equation}
+
+\begin{equation}
+y_{k}[n]=(x_{k}*h)[n]
+\label{eq:signal_segments2}
+\end{equation}
+
+Poté pro $kl + m - 1 \le n < kl + l + m - 1$ (obsah ktého segmentu) a $m - 1 \le n -kl < l + m - 1$ mù¾eme napsat rovnici \ref{eq:overlap_save}.\cite{conv:theory}
+
+\begin{equation}
+y[n]=\sum_{i=0}^{m-1}{h[i]\cdot x[n-i]}=\sum_{i=0}^{m-1}{h[i]\cdot x_{k}[n-kl-i]}=(x_{k}*h)[n-kl]=y_{k}[n-kl]
+\label{eq:overlap_save}
+\end{equation}
+
+\section{Konvoluèní teorém}
+\label{sec:convolution_theorem}
+
+Konvoluèní teorém je metoda výpoètu konvoluce a øíká, ¾e Fourierova transformace konvoluce se rovná skalárnímu souèinu Fourierových transformací operandù konvoluce. Jinými slovy mù¾eme øíct, ¾e konvoluce v~èasové oblasti se rovná skalárnímu souèinu ve frekvenèní oblasti. Toto je zapsáno rovnicí \ref{eq:convolution_theorem1}.
+
+\begin{equation}
+\mathcal{F}\{x*h\}=\mathcal{F}\{x\}\cdot\mathcal{F}\{h\}
+\label{eq:convolution_theorem1}
+\end{equation}
+
+Aplikováním inverzní Fourierovy transformace na obì strany rovnice \ref{eq:convolution_theorem1} dostaneme rovnici \ref{eq:convolution_theorem2}, kterou je mo¾né pou¾ít na výpoèet kovoluce.\cite{conv:handbook}
+
+\begin{equation}
+x*h=\mathcal{F}^{-1}\{\mathcal{F}\{x\}\cdot\mathcal{F}\{h\}\}
+\label{eq:convolution_theorem2}
+\end{equation}
+
+\section{Pøevod dvourozmìrné konvoluce na jednorozmìrnou}
+\label{sec:2D_signal_transform}
+
+Nech» $X_{M \times N}$ a $Y_{K \times L}$ jsou dvourozmìrné signály, kde spodní index znaèí velikost signálu. Konvoluce tìcht dvou signálù je signál $Z_{M+K-1 \times N+L-1}$, získaný pomocí rovnice \ref{eq:two_dimensional_convolution} pro $0 \leq i < M+K-1$ a $0 \leq j < N+L-1$.
+
+\begin{equation}
+Z(i,j)=\sum_{m=0}^{M-1}\sum_{n=0}^{N-1}X(m, n)Y(i-m, j-n)
+\label{eq:two_dimensional_convolution}
+\end{equation}
+
+Nech» $X'_{(M+K-1) \times (N+L-1)}$ a $Y'_{(M+K-1) \times (N+L-1)}$ jsou dvourozmìrné signály, které vznikly roz¹íøením signálù $X_{M \times N}$ a $Y_{K \times L}$ podle rovnice \ref{eq:widened_signal}.
+
+\begin{equation}
+A'_{(M+K-1) \times (N+L-1)}=\begin{pmatrix}
+a_{0,0} & a_{0,1} & \cdots & a_{0,N-1} & a_{0,N} & 0 & \cdots & 0 \\
+a_{1,0} & a_{1,1} & \cdots & a_{1,N-1} & a_{1,N} & 0 & \cdots & 0 \\
+\vdots & \vdots & \ddots & \vdots & \vdots & \vdots & \ddots & \vdots \\
+a_{M-1,0} & a_{M-1,1} & \cdots & a_{M-1,N-1} & a_{M-1,N} & 0 & \cdots & 0 \\
+a_{M,0} & a_{M,1} & \cdots & a_{M,N-1} & a_{M,N} & 0 & \cdots & 0 \\
+0 & 0 & \cdots & 0 & 0 & 0 & \cdots & 0 \\
+\vdots & \vdots & \ddots & \vdots & \vdots & \vdots & \ddots & \vdots \\
+0 & 0 & \cdots & 0 & 0 & 0 & \cdots & 0 \\
+\end{pmatrix}
+\label{eq:widened_signal}
+\end{equation}
+
+Nech» $X''$ a $Y''$ jsou jednorozmìrné signály, které vznikly ze  signálù $X'$ a $Y'$ konkatenací øádkù, tak aby první a poslední vzorky signálù $X''$ a $Y''$ odpovídal prvním a posledním vzorkùm signálù $X$ a $Y$. Nadbyteèné vzorky ze signálù $X'$ a $Y'$ se v~signálech $X''$ a $Y''$ neobjeví. Délka signálu $X''$ je $(M-1)(N+L-1)+N$ a délka $Y''$ je $(K-1)(N+L-1)+L$. Konvolucí signálù $X''$ a $Y''$ vznikne signál $Z'$ o~délce $(N+L-1)(M+K-1)$ viz rovnice \ref{eq:signal_length}. Signály $Z'$ a $Z$ mají stejný poèet vzorkù, díky tomu je mù¾eme  mezi sebou pøevést.\cite{conv:transform}
+
+\begin{equation}
+\begin{split}
+l_{Z'}=l_{X''}+l_{Y''}-1=\\(M-1)(N+L-1)+N+(K-1)(N+L-1)+L-1=\\(N+L-1)(M-1+K-1)+N+L-1=\\(N+L-1)(M-1+K-1+1)=\\(N+L-1)(M+K-1)
+\end{split}
+\label{eq:signal_length}
+\end{equation}
+
+\section{Pøevod n-rozmìrné konvoluce na jednorozmìrnou}
+\label{sec:ND_signal_transform}
+
+Zobecnìním konvoluce dvourozmìrných signálù získám konvoluci obecnì n-rozmìrných signálù. Algoritmus pøevodu je zalo¾ený na my¹lence, ¾e ka¾dý n-rozmìrný signál mù¾u pova¾ovat za pole (n-1)-rozmìrných signálù. Na tyto signály je rekurzivnì pou¾it algoritmus pøevodu. Výsledné jednorozmìrné signály jsou konkatenovány a doplnìny o~nuly tak, aby se délka doplnìného signálu rovnala délce odpovídající èásti výsledného signálu.\cite{conv:transform}
+
+\chapter{Implementace výpoètu}
+\label{chap:implementation}
+
+Tato kapitola se zabývá implementaci výpoètu diskrétní konvoluce pomocí rùzných algoritmù v~jazyce Rust a v~jazyce C pomocí OpenMP. První podkapitola obsahuje návrh výsledných aplikací. Následující podkapitoly se zabývají implementací jednotlivých metod výpoètu. Druhá podkapitola se vìnuje naivní metodì výpoètu konvoluce, následující dvì podkapitoly se zabývají algoritmy v~jazyce Rust, pátá podkapitola popisuje implementaci naivní metody pomocí OpenMP a poslední je vìnována vyu¾ití Fourierovy transformace.
+
+\section{Návrh}
+\label{sec:plan}
+
+Výsledkem implementace jsou dva programy. Jeden vytvoøený pomocí jazyka C a druhý pomocí jazyka Rust. Obì aplikace jsou zpou¹tìny pomocí pøíkazové øádky a neobsahují grafické u¾ivatelské rozhraní. Obvyklý bìh obou programù je mo¾né popsat pomocí následujícího výètu.
+
+\begin{enumerate}
+  \item Analýza argumentù pøíkazové øádky.
+  \item Naètení vstupního signálu a kernelu.
+  \item Pøevod vstupního signálu a kernelu na jednorozmìrné signály.
+  \item Výpoèet konvoluce podle zvolené metody.
+  \item Pøevod jednorozmìrného výstupního signálu na vícerozmìrný.
+  \item Ulo¾ení výstupního signálu.
+\end{enumerate}
+
+První program je napsám pomocí jazyka C podle standardu C99. Ke ètení a ukládání obrázkù pou¾ívá knihovnu DevIL.\cite{conv:devil} Paralelizace tohoto programu je provedena pomocí API OpenMP. Pro výpoèet rychlé Fourierovy transformace je pou¾ita knihovna FFTW.\cite{conv:fftw} Výpoèet konvoluce implementuje pomocí tøí metod: jednovláknové naivní metody, vícevláknové naivní metody a konvoluèního teorému. Druhý program je napsán pomocí jazyka Rust ve verzi 0.10. Ke ètení a ukládání obrázkù rovnì¾ pou¾ívá knihovnu DevIL.\cite{conv:devil} Konvoluci doká¾e spoèítat pomocí tøí metod: jednovláknové naivní metody, vícevláknové naivní metody a metody overlap-save. Kompletní popis rozhraní obou programù je v~pøíloze \ref{chap:interface_description}.
+
+\section{Naivní metoda}
+\label{sec:naive_method_rust}
+
+Nejjednodu¹¹ím zpùsobem jak vypoèítat konvoluci dvou signálù je naivní metoda, proto¾e vychází z~definice konvoluce podle vzorce \ref{eq:finite_discrete_convolution}, který je pou¾it pro výpoèet ka¾dého prvku výsledného signálu.
+
+Pøi pou¾ití jen jednoho vlákna jsou v¹echny prvky výsledného signálu vypoèteny sériovì v~jednom cyklu.
+
+\subsection{Paralelní naivní metoda v~jazyce Rust}
+\label{sub:multi_naive_method_rust}
+
+Tato metoda výchází z~pøedchozího zpùsobu výpoètu, ale pro výpoèet prvkù je pou¾ito nìkolik pracovních vláken. Ka¾dý prvek výsledného signálu je vypoèítán samostatnì v~jednom z~tìchto vláken. Pro ka¾dé dva prvky tak platí, ¾e mù¾ou být vypoèteny v~rùzných vláknech.
+
+Výpoèet v~hlavním vláknì se skládá ze ètyø èástí: vytvoøení pracovních vláken, odeslání zadání práce, odeslání pøíkazù k~ukonèení a sbìru výsledkù práce. Pøi tvorbì pracovního vlákna je do nìj vlo¾ena reference (viz. \ref{sub:shared_memory}) na vstupní signál a jádro. Pracovní vlákno pøijímá zadání práce od hlavního vlákna a vykonává je. Pro komunikaci mezi hlavním vláknem a pracovními vlákny se pou¾ívají dva kanály. Jeden pro zadávání práce pracovním vláknùm a druhý pro sbírání výsledkù práce hlavním vláknem. Zadání práce je dvojce $(A, I)$, kde $A$ je akce, kterou má pracovní vlákno provést, a $I$ je index prvku výsledného vlákna. Akce A~mù¾e nabývat dvou hodnot {\tt Compute} a {\tt Terminate}. První znaèí, ¾e vlákno má vypoèítat Itý prvek výstupního signálu, druhá ukonèí vlákno. Výsledek práce je dvojce $(I, R)$, kde $I$ je index prvku výsledného signálu a $R$ hodnota tohoto prvku. Tento algoritmus je popsán pomocí sekvenèního diagramu v~pøíloze \ref{diag:multi_naive}.
+
+\section{Metoda overlap-save v~jazyce Rust}
+\label{sec:overlapsave_rust}
+
+Výhodou této metody je omezení komunikace mezi vlákny, proto¾e poèet segmentù se rovná poètu pracovních vláken a do pracovních vláken tak není potøeba posílat pøíkazy a data. Ty jsou do pracovních vláken vlo¾ena pøi jejich vytvoøení.
+
+Hlavní vlákno vytvoøí zadaný poèet pracovních vláken a ka¾dému pøitom pøedá index segmentu výstupního signálu, který má spoèítat, odpovídající segment vstupního signálu a refenci na kernel. Poté pøijme segmenty výstupního signálu od pracovních vláken. Pracovní vlákno vypoèítá segment výstupního signálu, ode¹le ho hlavnímu vláknu a ukonèí se. Pro komunikaci mezi hlavním vláknem a pracovními vlákny se pou¾ívá jeden kanál, který je vyu¾it ke sbírání segmentù výstupního signálu. Ka¾dý segment výstupního signálu je poslán jako dvojce $(I, S)$, kde $I$ je index segmentu a $S$ je obsah segmentu. Tento algoritmus je zobrazen na sekvenèního diagramu v~pøíloze \ref{diag:overlapsave}.
+
+\section{Naivní metoda pomocí OpenMP}
+\label{sec:naive_method_openmp}
+
+Tato metoda je paralelizací naivní metody pomocí OpenMP. Výhodou této metody je to, ¾e se od neparalelní metody li¹í jen direktivami OpenMP.
+
+V¹echny prvky výsledného signálu jsou poèítány v~cyklu, který je paralelizován pomocí direktivy {\tt \#pragma omp parallel for if(parallel) num\_threads(number\_of\_threads)}, kde {\tt parallel} je promìnná typu {\tt bool} a øíká jestli má být cyklus paralelizován a kde {\tt number\_of\_threads} je poèet vláken, které mají být vyu¾ity pro výpoèet. Pøístup do výsledného signálu je o¹etøen direktivou {\tt \#pragma omp critical}.
+
+\section{Výpoèet pomocí konvoluèního teorému}
+\label{sec:convolution-theoremt}
+
+Implementace je provedena pomocí knihovny FFTW, která vypoèítá rychlou Fourierovu a inverzní Fourierovu transformaci. Je to jedna z~nejrychlej¹ích knihoven pro výpoèet Fourierovy transformace.\cite{conv:fftw} Kompletní postup výpoètu krok po kroku je uveden ní¾e.
+
+\begin{enumerate}
+  \item Pøevedu vstupní signál a kernel z~datovéhu typu {\tt double} na typ {\tt fftw\_complex}.
+  \item Transformuji vstupní signál a kernel pomocí Fourierovy transformace.
+  \item Provedu skalární násobení vstupního signálu a kernelu.
+  \item Výsledek násobení transformují pomocí inverzní Fourierovy transformace.
+  \item Pøevedu výstupní signál z~datovéhu typu {\tt fftw\_complex} na typ {\tt double}.
+\end{enumerate}
+
+\chapter{Mìøení výkonu}
+\label{apen:benchmark}
+
+Tato kapitola popisuje jakým zpùsobem byl testovám výkon implementovaných metod. První podkapitola popisuje mìøící skript a druhá výsledky, které byly získány pomocí tohoto skriptu.
+
+\section{Mìøicí skript}
+\label{sec:bench_script}
+
+Skript je napsaný v~jazyce Python 3 a vyu¾ívá program {\tt time} pro mìøení èasu. Skládá z~pøípadù, kde pøípad je identifikován podle pou¾itého jazyka, metody a poètu vláken. Pøípad je reprezentován tøídou {\tt Case}. Provedení mìøení se skládá ze tøí èástí: vytvoøení seznamu pøípadù, mìøení doby výpoètu jednotlivých pøípadù a výpisu výsledkù.
+
+Vytvoøení seznamu pøípadù je mo¾né ovlivnit pomocí argumentù pøíkazové øádky. Pokud nejsou zadány ¾ádné jsou vytvoøeny v¹echy mo¾né pøípady pro 1 a¾ 16 vláken. Pokud jsou zadány argumenty provedou pouze v~nich definované pøípady. Argumenty {\tt rust} a {\tt c} øíkají, pøidá do seznamu v¹echny pøípady zadaného jazyka pro 1 a¾ 16 vláken. Argument {\tt <jazyk>:<metoda>} pøidá do seznamu pøípady zadaného jazyka a metody pro 1 a¾ 16 vláken. Argument {\tt <jazyk>:<metoda>:n} pøidá do seznamu pøípad se zadaným jazykem a metodou pro n vláken.
+
+Mìøení doby výpoètu se provádí pro ka¾dý pøípad oddìlenì. Jako vstupní signál je pou¾it soubor {\tt lena.jpg} ze slo¾ky {\tt inputs}. Kernely jsou naèítány ze slo¾ky {\tt kernels}. Pro ka¾dý pøípad je provedeno 100 mìøení na rùzných kernelech. Výsledné signály jsou ulo¾eny do slo¾ky {\tt outputs}. Ve výpisu výsledkù jsou uvedeny aritmetické prùmìry v¹ech mìøení.
+
+\section{Výsledky}
+\label{sec:bench_results}
+
+Mìøení probìhlo na ètyøjádrovém procesoru Intel Core i5-3570K. Výsledky mìøení jsou rozdìleny na dvì èásti tabulka \ref{table:single} zobrazuje jednovláknové metody a tabulka \ref{table:multi} vícevláknové metody.
+
+\begin{table}
+\centering
+\begin{tabular}{|l|l|}
+    \hline
+    Metoda & Délka výpoètu (ms)\\
+    \hline
+    konvoluèní teorém & 25,4\\
+    jednovláknová naivní C & 51,3\\
+    jednovláknová naivní Rust & 71,5\\
+    \hline
+\end{tabular}
+\caption{Délky výpoètu jednovláknových metod}
+\label{table:single}
+\end{table}
+
+\begin{table}
+\centering
+\begin{tabular}{|l|l|l|l|}
+    \hline
+    poèet vláken & vícevláknová & vícevláknová & overlap-save\\
+    & naivní v~C (ms) & naivní v~Rustu (ms) & v~Rustu (ms)\\
+    \hline
+    1 & 50,5 & 90,4 & 75,8\\
+    2 & 22,3 & 40,9 & 38,9\\
+    3 & 20,1 & 31,0 & 30,4\\
+    4 & 11,7 & 28,3 & 24,2\\
+    5 & 18,4 & 30,7 & 25,9\\
+    6 & 17,4 & 28,5 & 25,4\\
+    7 & 17,4 & 26,3 & 24,7\\
+    8 & 16,7 & 28,9 & 24,7\\
+    9 & 17,5 & 29,1 & 25,8\\
+    10 & 17,6 & 26,8 & 25,8\\
+    11 & 17,1 & 28,8 & 25,0\\
+    12 & 17,1 & 30,3 & 25,7\\
+    13 & 16,8 & 30,7 & 25,5\\
+    14 & 16,7 & 29,8 & 28,1\\
+    15 & 16,9 & 30,5 & 25,2\\
+    16 & 17,5 & 31,1 & 26,2\\
+    \hline
+\end{tabular}
+\caption{Délky výpoètu vícevláknových metod}
+\label{table:multi}
+\end{table}
+
+\chapter{Porovnání implementací}
+\label{chap:comparison}
+
+V~této kapitole jsou porovnány implementace metod z~kapitoly \ref{chap:implementation}. První podkapitola obsahuje porovnání v¹ech metod podle délky výpoètu. Druhá podkapitola se vìnuje porovnání rychlosti implementací paralelních metod s~náhledem k~poètu vláken pou¾itých pøi výpoètu. Tøetí podkapitola je vìnována porovnání metod podle poètu odeslaných zpráv. Poslední podkapitola porovnává implementace z~pohledu programátora.
+
+\section{Podle délky výpoètu}
+\label{sec:calc_len}
+
+Nejdùle¾itìj¹ím kritériem porovnávání implementací je délka výpoètu. V¹echny implementace jsou porovnány vzhledem k~referenèní metodì vyu¾ívající konvoluèní teorém, proto¾e k~její implementaci byla vyu¾ita profesionální knihovna FFTW. Tato metoda spoèítala výsledný signál za 25,4 ms.
+
+Nejrychlej¹í implementací byla vícevláknová metoda pomocí OpenMP, která provedla výpoèet výsledného signálu za 11,7 ms, to je ménì ne¾ polovièna èasu, který potøebovala refenèní metoda. Metoda overlap-save a vícevláknová naivní metoda v~Rustu spoèítaly signál za èasy podobné referenèní metodì. Délka výpoètu jednovláknových naivních metod je výraznì vy¹¹í ne¾ refenèní metody. Pøesné výsledky jsou uvedeny v~tabulce \ref{table:perf}.
+
+\begin{table}
+\centering
+\begin{tabular}{|l|l|}
+    \hline
+    Metoda & Délka výpoètu (ms)\\
+    \hline
+    vícevláknová naivní v~OpenMP &  11,7\\
+    overlap-save Rust & 24,2\\
+    konvoluèní teorém & 25,4\\
+    vícevláknová naivní Rust & 26,3\\
+    jednovláknová naivní C & 51,3\\
+    jednovláknová naivní Rust & 71,5\\
+    \hline
+\end{tabular}
+\caption{Délky výpoètu}
+\label{table:perf}
+\end{table}
+
+\section{Podle poètu vláken}
+\label{sec:thread_number}
+
+Rychlost paralelních metod je ovlivnìna poètem jader procesosu a poètem vláken, které metoda pou¾ívá pro výpoèet. Referenèní procesor obsahuje ètyøi jádra. Poèet vláken je promìnný a je pøedmìtem této podkapitoly.
+
+Naivní metoda pomocí OpenMP dosahuje nejvy¹¹í rychlosti pøi pou¾ití ètyø vláken, kdy je výsledný signál spoèítán za 11,7 milisekund. Doba výpoètu je nejvy¹¹í pøi pou¾ití jednoho vlákna a sni¾uje se s~vy¹¹ím poètem vláken a¾ do minima pøi vyu¾ití ètyø procesù. Pøi pou¾ití pìti a¾ ¹estnácti vláken kolísá mezi 16,7 a 18,4 ms, to je výraznì více ne¾ minimum. Závislost délky výpoètu a poètu vláken je zobrazena v~grafu \ref{graph:naive_openmp}.
+
+\begin{figure}
+\centering
+\begin{tikzpicture}
+    \begin{axis}[xlabel=Poèet vláken,ylabel=Délka výpoètu (ms),ymin=0,xmin=0]
+    \addplot [mark=*] coordinates { (1, 50.5) (2, 22.3) (3, 20.1) (4, 11.7) (5, 18.4) (6, 17.4) (7, 17.4) (8, 16.7) (9, 17.5) (10, 17.6) (11, 17.1) (12, 17.1) (13, 16.8) (14, 16.8) (15, 16.7) (16, 17.5)};
+    \end{axis}
+\end{tikzpicture}
+    \caption{Délka výpoètu paralení naivní metody pomocí OpenMP v~závisloti na poètu vláken.}
+    \label{graph:naive_openmp}
+\end{figure}
+
+Naivní metoda v~jazyce Rust vypoèítá výsledný signál nejrychleji pøi pou¾ití sedmi vláken a to za 26,3 ms. Doba výpoètu je nejvy¹¹í pøi pou¾ití jednoho vlákna a sni¾uje se s~vy¹¹ím poètem vláken a¾ do tøí. Pøi pou¾ití tøí a¾ ¹estnácti vláken kolísá doba výpoètu mezi 26,3 a 31 ms, to jsou hodnoty mírnì vy¹¹í ne¾ minimum. Grafické znázornìní je v~grafu \ref{graph:naive_rust}.
+
+\begin{figure}
+\centering
+\begin{tikzpicture}
+    \begin{axis}[xlabel=Poèet pracovních vláken,ylabel=Délka výpoètu (ms),ymin=0,xmin=0]
+    \addplot [mark=*] coordinates { (1, 90.4) (2, 40.9) (3, 31.0) (4, 28.3) (5, 30.7) (6, 28.5) (7, 26.3) (8, 28.9) (9, 29.1) (10, 26.8) (11, 28.8) (12, 30.3) (13, 30.7) (14, 29.8) (15, 30.5) (16, 31.1)};
+    \end{axis}
+\end{tikzpicture}
+    \caption{Délka výpoètu paralení naivní metody v~jazyce Rust v~závisloti na poètu pracovních vláken.}
+    \label{graph:naive_rust}
+\end{figure}
+
+Výpoèet pomocí metody Overlap-save byl nejrychlej¹í pøi pou¾ití ètyø vláken. Jeho délka byla 24,2 ms. Doba výpoètu je nejvy¹¹í pøi pou¾ití jednoho vlákna a sni¾uje se s~vy¹¹ím poètem vláken a¾ do minima pøi pou¾ití ètyø vláken. Pøi vyu¾ití pìti a¾ ¹estnácti vláken se délka výpoètu pohybovala mezi 24,7 a 28,1 ms, to jsou hodnoty mírnì vy¹¹í ne¾ minimum. Závislost délky výpoètu a poètu vláken zobrazuje graf \ref{graph:overlapsave_rust}.
+
+\begin{figure}
+\centering
+\begin{tikzpicture}
+    \begin{axis}[xlabel=Poèet pracovních vláken,ylabel=Délka výpoètu(ms),ymin=0,xmin=0]
+    \addplot [mark=*] coordinates { (1, 75.8) (2, 38.9) (3, 30.4) (4, 24.2) (5, 25.9) (6, 25.4) (7, 24.7) (8, 24.7) (9, 25.8) (10, 25.8) (11, 25.0) (12, 25.7) (13, 25.5) (14, 28.1) (15, 25.2) (16, 26.2)};
+    \end{axis}
+\end{tikzpicture}
+    \caption{Délka výpoètu metody overlap-save v~jazyce Rust v~závisloti na poètu pracovních vláken.}
+    \label{graph:overlapsave_rust}
+\end{figure}
+
+\section{Podle poètu zpráv odeslaných mezi vlákny}
+\label{sec:msg_number}
+
+Komunikace mezi vlákny má vliv na celkový výkon programu. Èím více zpráv metoda pou¾ije tím více èasu je vy¾adováno na jejich zpracování. V~této podkapitole porovnám poèet zpráv pou¾itých v~paralelních metodách jazyka Rust.
+
+Paralení naivní metoda pou¾ívá jednu zprávu pro zadání výpoètu jednoho prvku a jednu zprávu pro obdr¾ení výsledku práce. Z~toho vyplívá, ¾e pro výpoèet jednoho prvku výsledného signálu potøebuji dvì zprávy. Poèet zpráv na výpoèet celého signálu je $p_{naive}=2n_{y}$, kde $n_{y}$ je délka výsledného signálu.
+
+Metoda overlap-save pou¾ívá jednu zprávu pro obdr¾ení segmentu výsledného signálu. Poèet segmentù je roven poètu vláken, který je zadán u¾ivatelem. Poèet zpráv pro výpoèet celého výstupního signálu je tedy roven poètu vláken.
+
+Pøi mìøení výkonu je pou¾íván vstupní signál o~rozmìrech 128x128 prvkù. Kernel má rozmìry 16x16 prvkù. Na výpoèet budou pou¾ity ètyøi vlákna. Výstupní signál má rozmìry 144x144 prvkù, to znamená, ¾e tvoøen 20736 prvky. Naivní metoda pou¾ije pro výpoèet 41472 zpráv. Metoda overlap-save pou¾ije 4 zprávy. V~tomto pøípadì metoda overlap-save pou¾ije 10368krát ménì zpráv ne¾ naivní metoda.
+
+\section{Z~pohledu programátora}
+\label{sec:programmer_view}
+
+Hlavním rozdílem pøi implementaci algoritmù mezi OpenMP a Rustem jsou rùzné pøístupy pro paralelizaci programù. Jazyk Rust pou¾ívá speciální konstrukce jazyka pro vyjádøení paralelizace a komunikace mezi procesy. Jazyk C takové konstrukce neobsahuje, a proto se pou¾ívají smìrnice pro pøekladaè, které se vkládají do sekvenèního kódu.\cite{openmp:book} Tyto dva pøístupy ssebou pøiná¹ejí výhody i nevýhody.
+
+Výhodou OpenMP je to, ¾e program funguje i bez direktiv pro pøekladaè. Program tak mù¾e být napsán a otestován jako jednovláknový. Paralelizace tak mù¾e být provedena pozdìji, napøíklad podle výsledkù profilování. Z~toho i vychází druhá výhoda a ta je, ¾e paralelní verze algoritmu se od neparalelní li¹í jen direktivami. Konkrétnì v~praktické èásti této práce je paralelizace provedena pomocí dvou øádkù. Nejvìt¹í nevýhodou jen to, ¾e ne v¹echny funkce standardní knihovny jazyka C jsou bezpeèné pro pou¾ití ve více vláknových aplikacích.\cite{c:threads} Dal¹í nevýhodou je závislot na externí knihovnì, která není standardní souèástí jazyka. Mezivláknová komunikace v~OpenMP je øe¹ena pomocí sdílené pamìti. Pøístup k~ní musí být o¹etøen a ¹patné o¹etøení sdílené pamìti mù¾e vést k~uváznutí nebo ¹patnému fungování programu.
+
+Hlavní výhodou jazyka Rust je, ¾e byl navr¾en jako jazyk pro paralelní programování. To znamená, ¾e v¹echny konstrukce potøebné pro tvorbu paralelních programù jsou souèástí standardní knihovny, která je bezpeèná pro pou¾ití ve vícevláknových programech.\cite{rust:manual} Sdílení dat je zjednodu¹eno nemìnitelnými promìnnými. Rust obsahuje mechanizmy zvy¹ující bezpeènost jazyka jako napøíklad nemìnitelné promìnné a kontrola indexù pøi práci s~vektory. Nejvìt¹í nevýhodou jazyka Rust je jeho nízký vìk a ním spojená nestálost. Nové verze pøiná¹ejí nové konstrukce a odstraòují staré, tak¾e nejsou vzájemnì kompatibilní. Oficiálním návodùm chybí kapitoly a neoficiální jsou obvykle psané pro star¹í verze. Nevýhodou zvý¹ení bezpeènosti pøi práci s~vektory je zvý¹ení doby práce s~vektory.
+
+\chapter{Závìr}
+
+V~této práci jsem implementoval celkem ¹est metod pro výpoèet konvoluce v~jazyce Rust, jazyce C s~pou¾itím OpenMP a pomocí knihovny FFTW. Metody jsem mezi sebou porovnal pomocí nìkolika kritérií.
+
+Nejrychlej¹í byla vícevláknová metoda pomocí OpenMP, která spoèítala výsledek za 11,7 ms. Druhá nejrychlej¹í byla metoda overlap-save v~jazyce Rust, ta spoèítala výsledný signál za více ne¾ dvounásobek èasu nejrychlej¹í metody - 24,2 ms. Pøi porovnání podle poètu vláken jsem zjistil, ¾e metoda pou¾ívající OpenMP je nejrychlej¹í pøi pou¾ití poètu vláken, který se rovná poètu jader procesoru. Ideální poèet vláken má výrazný vliv na tuto metodu. V~jazyce Rust je poèet vláken ménì dùle¾itý. Pokud je poèet vláken rovný nebo vy¹¹í ne¾ poèet jader, dosahují metody podobné rychlosti. Jednovláknové naivní metody se li¹í o~20,2 ms, tento výrazný rozdíl demonstruje jak je výkon stejného algoritmu ovlivnìn jazykem implementace. Doba výpoètu vícevláknových metod v~jazyce Rust se li¹ila pouze o~1,9 ms. Tento rozdíl byl zpùsoben odli¹ným poètem zpráv, které tyto metody pou¾ívají.
+
+Z~pohledu programátorské pøívìtivosti je na tom lépe OpenMP. Jazyk Rust má sice mnoho vlastností, které ho pøedurèují k~tomu, aby byl velmi dobrým jazykem pro tvorbu paralelních programù. Ty jsou ale zastínìny jeho nevyzrálostí.
+
+Vícevláknová metoda v~pomocí OpenMP dosáhla výraznì lep¹ích výsledkù ne¾ metoda pou¾ívající knihovnu FFTW, proto si myslím, ¾e tato metoda je vhodná pro pou¾ití ve výzkumu èi praxi. Metody implementované v~jazyce Rust mù¾ou být po vydání nové verze aktualizovány a vyu¾ity pro porovnávání výkonu mezi starou a novou verzí pøekladaèe jazyka. Jednovláknová naivní metoda mù¾e slou¾it pro porovnání optimalizace sekvenèního kódu. Rozdíl mezi vícevláknovou naivní a overlap-save je ovlivnìn úèinností práce s~velkým poètem zpráv u~první metody, toto mù¾e být pou¾ito pro testování efektivity práce se zprávami.
+

@@ -1,0 +1,20 @@
+\begin{lstlisting}[language=python,caption=Převod nrozměrného signálu na jednorozměrný,label=code:ndimensional_transform]
+def transformace(signál, rozměry, bez_nul_na_konci)
+  if je_jednorozměrný(signál):
+    if bez_nul_na_konci:
+      return signál
+    else:
+      return signál+signál_nul(rozměry[0]-len(signál))
+  else:
+    result=[]
+    if bez_nul_na_konci:
+      for subsignál in signál[:-1]:
+        result=result+transformace(subsignál, rozměry[1:], false)
+      return result+transformace(signál[-1], rozměry[1:], true)
+    else:
+      velikost_rozšířeného=reduce(lambda x, y: x*y, rozměry[1:], 1)
+      počet_nul=(rozměry[0]-len(signál))*velikost_rozšířeného
+      for subsignál in signál:
+        result=result+transformace(subsignál, rozměry[1:], false)
+      return result+signál_nul(počet_nul)
+\end{lstlisting}

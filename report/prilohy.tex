@@ -1,0 +1,138 @@
+\definecolor{object-fill}{gray}{0.95}
+\definecolor{note-fill}{gray}{0.93}
+\tikzumlset{fill object=object-fill}
+\tikzumlset{fill note=note-fill}
+
+\chapter{Obsah CD}
+\label{chap:cd}
+
+\begin{description}
+    \item[/inputs] Ukázky vstupních signálù.
+    \item[/kernels] Ukázky kernelù.
+    \item[/outputs] Slo¾ka pro výstupní signály.
+    \item[/report] Zdrojové soubory tohoto repotu.
+    \item[/src] Zdrojové soubory praktické èásti této práce.
+\end{description}
+
+\chapter{Po¾adavky}
+\label{chap:requirements}
+
+\begin{itemize}
+  \item GCC 4.7.0 nebo vy¹¹í
+  \item DevIL 1.7.8 nebo vy¹¹í
+  \item FFTW 3.3.3 nebo vy¹¹í
+  \item rustc 0.10
+\end{itemize}
+
+\chapter{Popis rozhraní}
+\label{chap:interface_description}
+
+Rozhraní obou programù jsou si velmi podobná. Li¹í se pouze seznamem podporovaných metod. Podporované metody a k~nim odpovídající hodnota pøepínaèe {\tt -m} jsou zapsány v~tabulce \ref{table:methods}. Následující výèet popisuje jednotlivé pøepínaèe programù.
+
+\begin{description}
+    \item[-h] Vypi¹ nápovìdu.    
+    \item[-i FILENAME] Vstupní signál je ulo¾en v~souboru FILENAME.
+    \item[-k FILENAME] Kernel je ulo¾en v~souboru FILENAME.
+    \item[-o FILENAME] Výstupní signál bude ulo¾en do souboru FILENAME.
+    \item[-a] Vstupní signál je ulo¾en po sloupcích.
+    \item[-b] Kernel je ulo¾en po sloupcích.
+    \item[-c] Výstupní signál bude ulo¾en po sloupcích.
+    \item[-m METHOD] Pro výpoèet pou¾ij metodu METHOD podle tabulky \ref{table:methods}.
+\end{description}
+
+Pokud je zadán pøepínaè {\tt -h} v¹echny ostatní se ignorují. Pokud nejsou zadány pøepínaèe {\tt-i}, {\tt-k} a {\tt-o} je program ukonèen kvùli chybì na pøíkazovém øádku. Kdy¾ není zadán pøepínaè {\tt-m} je pou¾ita jednovláknová naivní metoda.
+
+\begin{table}
+\centering
+\begin{tabular}{|l|l|l|l|}
+    \hline
+    Metoda & Parametr & C & Rust\\
+    \hline
+    konvoluèní teorém & {\tt fourier} & Ano & Ne\\
+    jednovláknová naivní & {\tt single-naive} & Ano & Ano\\
+    vícevláknová naivní & {\tt multi-naive} & Ano & Ano\\
+    overlap-save & {\tt overlap-save} & Ne & Ano\\
+    \hline
+\end{tabular}
+\caption{Podporované metody}
+\label{table:methods}
+\end{table}
+
+\chapter{Diagramy}
+\label{chap:diagrams}
+
+\begin{figure}[H]
+\centering
+\resizebox{\linewidth}{!}{
+\begin{tikzpicture}
+\begin{umlseqdiag}
+    \umlobject[class=Thread]{Master}
+    \umlcreatecall[class={(Sender, Receiver)}]{Master}{ResultChannel}
+    \umlcreatecall[class=Thread]{Master}{Worker1}
+    \umlcreatecall[class=Thread]{Master}{Worker2}
+    \begin{umlfragment}[type=par,inner ysep=2]
+        \begin{umlcallself}[op={convolve\_vectors\_with\_padding()},dt=13]{Worker1}
+        \end{umlcallself}
+        \begin{umlcall}[op={send((n, result))}]{Worker1}{ResultChannel}
+        \end{umlcall}    
+        \umlfpart[par]
+        \begin{umlcallself}[op={convolve\_vectors\_with\_padding()},dt=17]{Worker2}
+        \end{umlcallself}
+        \begin{umlcall}[op={send((n, result))}]{Worker2}{ResultChannel}
+        \end{umlcall}    
+        \umlfpart[par]
+        \begin{umlfragment}[type=loop,label={pro ka¾dé pracovní vlákno},inner ysep=6]
+            \begin{umlcall}[op={recv()},return={(n, result)},dt=43 ]{Master}{ResultChannel}
+            \end{umlcall}
+        \end{umlfragment}
+    \end{umlfragment}
+\end{umlseqdiag}
+\end{tikzpicture}}
+    \caption{Metoda overlap-save v~jazyce Rust.}
+    \label{diag:overlapsave}
+\end{figure}
+
+\begin{figure}
+\centering
+\resizebox{\linewidth}{!}{
+\begin{tikzpicture}
+\begin{umlseqdiag}
+    \umlobject[class=Thread]{Master}
+    \umlcreatecall[class={(Sender, Receiver)}]{Master}{JobChannel}
+    \umlcreatecall[class={(Sender, Receiver)}]{Master}{ResultChannel}
+    \umlcreatecall[class=Thread]{Master}{Worker}
+    \begin{umlfragment}[type=par,inner ysep=2]
+        \begin{umlfragment}[type=loop,label={pro ka¾dý prvek výsledného signálu},inner ysep=6]
+            \begin{umlcall}[op={send((Compute, n))},dt=15]{Master}{JobChannel}
+            \end{umlcall}
+        \end{umlfragment}
+        \begin{umlfragment}[type=loop,label={pro ka¾dé pracovní vlákno},inner ysep=6]
+        \begin{umlcall}[op={send((Terminate, 0))},dt=18]{Master}{JobChannel}
+        \end{umlcall}
+        \end{umlfragment}
+        \begin{umlfragment}[type=loop,label={pro ka¾dý prvek výsledného signálu},inner ysep=6]
+            \begin{umlcall}[op={recv()},return={(n, result)},dt=20]{Master}{ResultChannel}
+            \end{umlcall}
+        \end{umlfragment}
+        \umlfpart[par]
+        \begin{umlfragment}[type=loop,inner ysep=2,name=break]
+            \begin{umlcall}[op={recv()},return={(cmd, n)},dt=80]{Worker}{JobChannel}
+            \end{umlcall}
+            \begin{umlfragment}[type=alt,label={cmd==Compute},inner ysep=2]
+                \begin{umlcallself}[op={convolve\_one\_element()}]{Worker}
+                \end{umlcallself}
+                \begin{umlcall}[op={send((n, result))},dt=7]{Worker}{ResultChannel}
+                \end{umlcall}
+                \umlfpart[cmd==Terminate]
+                \begin{umlcallself}[op={terminate()}]{Worker}
+                \end{umlcallself}
+            \end{umlfragment}
+        \end{umlfragment}
+        \umlnote[x=15,y=-13]{break}{Tento cyklus je ukonèen voláním funkce terminate.}
+    \end{umlfragment}
+\end{umlseqdiag}
+\end{tikzpicture}}
+    \caption{Vícevláknová naivní metoda v~jazyce Rust.}
+    \label{diag:multi_naive}
+\end{figure}
+
